@@ -1,77 +1,77 @@
-importインポート discorddiscord
-fromdiscord import app_commands よりdiscord import app_commands
-fromdiscord。ui import View, Button よりdiscord.ui import View, Button
-fromdiscord。ext インポートタスクからdiscord.ext import tasks
-fromPIL インポート Image、ImageDraw、ImageFont からPIL import Image, ImageDraw, ImageFont
-importimport ioio
-importos をインポートos
-importテキストラップをインポートtextwrap
-importglob をインポートglob
-fromgoogleapiclient。discovery インポートビルド からgoogleapiclient.discovery import build
-fromkeep_alive インポートから keep_aliveimport keep_alive
+import discord
+from discord import app_commands
+from discord.ui import View, Button
+from discord.ext import tasks
+from PIL import Image, ImageDraw, ImageFont
+import io
+import os
+import textwrap
+import glob
+from googleapiclient.discovery import build
+from keep_alive import keep_alive
 
-## Discord Bot の の consult TOTOACHONB 咎めDiscord Botのセットアップ
-intentsintents = discord。Intents。default()discord.Intents.default()
-intentsintents。members = Truemembers = True
-clientクライアント = discord。Client（intents=intents, reconnect=True）discord.Client(intents=intents, reconnect=True)
-treeツリー = app_commands。CommandTree（クライアント）CommandTree(client)
+# Discord Botのセットアップ
+intents = discord.Intents.default()
+intents.members = True
+client = discord.Client(intents=intents, reconnect=True)
+tree = app_commands.CommandTree(client)
 
-TOKENTOKEN = os。getenv("TOKEN")os.getenv("TOKEN")
-YOUTUBE_API_KEY = os。getenv("youtube_api_key")os.getenv("youtube_api_key")
-CHANNEL_ID = os。getenv("chanel_id")os.getenv("chanel_id")
-YOUTUBE_CHANNEL_ID = os。getenv("youtube_id")os.getenv("youtube_id")
+TOKEN = os.getenv("TOKEN")
+YOUTUBE_API_KEY = os.getenv("youtube_api_key")
+CHANNEL_ID = os.getenv("chanel_id")
+YOUTUBE_CHANNEL_ID = os.getenv("youtube_id")
 
-MAX_CHARS_PER_LINE = 16 # 16 文字の行16  # 16文字ごとに改行
-MAX_IMAGES = 10 # RECORRENT son suurneu 影の / 大数10  # 保存する画像の最大数
+MAX_CHARS_PER_LINE = 16  # 16文字ごとに改行
+MAX_IMAGES = 10  # 保存する画像の最大数
 
-## YouTube API の 尖 際 錫YouTube APIの初期化
-youtubeyoutube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY）build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-## 汝新の 'は' 'は' RECONITION sons し det, 'は' 通るは 'は'IDを保存して、重複通知を防ぐ
-latest_video_id = なしNone
+# YouTube APIの初期化
+youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+# 最新の動画IDを保存して、重複通知を防ぐ
+latest_video_id = None
 
-@client。eventclient.event
-asyncasync def on_ready():def on_ready():
- await tree。sync()await tree.sync()
- check_new_videos。start()start()
- print（f"{client。user} としてログインしました")print(f"We have logged in as {client.user}")
+@client.event
+async def on_ready():
+    await tree.sync()
+    check_new_videos.start()
+    print(f"We have logged in as {client.user}")
 
-##60 瀹 とにニェェ？ちょ60分ごとにチェック
-@tasks。loop（分=60)tasks.loop(minutes=60)
-asyncasync def check_new_videos():def check_new_videos():
- グローバル latest_video_idglobal latest_video_id
- 試してみてください:try:
- 応答 = youtube。search()。list()response = youtube.search().list(
- part= "スニペット" 、part="snippet",
- channelid=youtube_CHANNEL_ID 、channelId=YOUTUBE_CHANNEL_ID,
- order= "日付" 、order="date",
- maxresults=1 、maxResults=1,
- type= "video"type="video"
- )。execute()).execute()
+# 60分ごとにチェック
+@tasks.loop(minutes=60)
+async def check_new_videos():
+    global latest_video_id
+    try:
+        response = youtube.search().list(
+            part="snippet",
+            channelId=YOUTUBE_CHANNEL_ID,
+            order="date",
+            maxResults=1,
+            type="video"
+        ).execute()
 
- video_id = response['items'][0]['id']['videoId']response['items'][0]['id']['videoId']
- video_title = response['items'][0]['snippet']['title']response['items'][0]['snippet']['title']
- video_thumbnail = response['items'][0]['snippet']['thumbnails']['high']['url']response['items'][0]['snippet']['thumbnails']['high']['url']
- video_url = f"https://www。youtube。com/watch？v={video_id}"f"https://www.youtube.com/watch?v={video_id}"
+        video_id = response['items'][0]['id']['videoId']
+        video_title = response['items'][0]['snippet']['title']
+        video_thumbnail = response['items'][0]['snippet']['thumbnails']['high']['url']
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
 
- もしvideo_id！= latest_video_id:if video_id != latest_video_id:
- channel = client。get_channel（int（CHANNEL_ID）)channel = client.get_channel(int(CHANNEL_ID))
+        if video_id != latest_video_id:
+            channel = client.get_channel(int(CHANNEL_ID))
 
- = discord。Embed を埋め込む (embed = discord.Embed(
- title=video_title 、title=video_title,
- url=video_url 、url=video_url,
- description= "新思イグガpublicelougaレマ思タ！:忠:",description="新しい動画が公開されました！:tada: ",
- color=discord。color。red()color=discord.Color.red()
+            embed = discord.Embed(
+                title=video_title,
+                url=video_url,
+                description="新しい動画が公開されました！:tada: ",
+                color=discord.Color.red()
             )
- embed。set_thumbnail（url=video_thumbnail）embed.set_thumbnail(url=video_thumbnail)
+            embed.set_thumbnail(url=video_thumbnail)
 
- await channel。send（embed=embed）await channel.send(embed=embed)
- latest_video_id = video_id
+            await channel.send(embed=embed)
+            latest_video_id = video_id
 
- e: としての例外を除くexcept Exception as e:
- print（f"etLAー gazu 生しまし た: {e}")print(f"エラーが発生しました: {e}")
+    except Exception as e:
+        print(f"エラーが発生しました: {e}")
 
-## ウーリーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシューダーヌーのシュー
-defdef delete_all_images（user_id）:(user_id):
+# ユーザーのすべての画像を削除
+def delete_all_images(user_id):
     user_images = get_user_images(user_id)
     for img in user_images:
         delete_image(img)
@@ -259,90 +259,90 @@ class DeleteConfirmationView(discord.ui.View):
         self.stop()
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
- async def cancel_button（self, interaction: discord。相互作用、ボタン: discord。うい。Button）:
- イハヤトラ シ シネッ。レスポンス。send_message ウーシン ロチマ ス ()
- content= "「 creti agak」" "「 creti agak」"
- ephemeral=true
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            content="削除がキャンセルされました。",
+            ephemeral=True
         )
- となる()は、ラーチーチー()、ラーチーチーチー()、ラーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチーチー
+        self.stop()
 
-@ツリー。command（name= "library", description="e。ウーーヽーのREQUISION sonsishiantoinamo SHOMA su」
-async def library（interaction: discord。インタラクション、名前: str = None、n: int = None）:
- user_id = インタラクション。ユーザー。id を
+@tree.command(name="library", description="ユーザーの保存した画像を表示します")
+async def library(interaction: discord.Interaction, name: str = None, n: int = None):
+    user_id = interaction.user.id
 
- 名前前ガアールリン合:
- # 指田名前之者之尾之尾
- image_path = get_image_by_name（user_id, name）
- if image_path:
- イハヤトラ シ シネッ。レスポンス。send_message ウーシン ロチマ ス ()
- content=f "指文字リータハニ名前之尾尾: {name}",
- ファイル=discord。file（image_path）
+    if name:
+        # 指定した名前の画像を検索
+        image_path = get_image_by_name(user_id, name)
+        if image_path:
+            await interaction.response.send_message(
+                content=f"指定された名前の画像: {name}",
+                file=discord.File(image_path)
             )
- 瀹ノクスン:
- イハヤトラ シ シネッ。レスポンス。send_message ウーシン ロチマ ス ()
- content=f"dificedsa leat Name precous no'su long "DIFF"/diffidsa Leat Name「{ は見ます。limaimaringnt 出社ま し た。
+        else:
+            await interaction.response.send_message(
+                content=f"指定された名前の画像「{name}」は見つかりませんでした。"
             )
- elif nは、なしは、ハlimaisernancを出発:
- #指Sahzu田竜Go乃竜龍ヲ 表竜
- image_path = get_image_by_index（user_id、n）
- if image_path:
- イ ミ ヒ ノトラ シ シニ？リィー ーニーイー シィー。莠ャ驛ス_メッ ぉーあぃー ゥーー シーー シーー ノ シー（()
- コンテンツ=f の{n + 1}ず mime no'su n。ゥーゥゥゥ アウウーズリーヅ シマサ。、
- 涔ァハ =discord。file（image_path）
+    elif n is not None:
+        # 指定された番号の画像を表示
+        image_path = get_image_by_index(user_id, n)
+        if image_path:
+            await interaction.response.send_message(
+                content=f"{n + 1}番目の画像を表示します。",
+                file=discord.File(image_path)
             )
- 瀹ノ ぢ？、まあ:
- イ ミ ヒ ノトラ シ シニ？リー ーニーイーシー。send_message ゥーシー シーシー シーノ シーー（sechais）Milinichi ノイ イック ()
- content=f{n + 1}ず mime no'su n。y 。涔 Riri dun no noishedkita Rich, シ ニイイ リ リ ウ ニニェーマッ ニシニョン。」
+        else:
+            await interaction.response.send_message(
+                content=f"{n + 1}番目の画像は存在しません。"
             )
- 瀹ノ ぢ？、まあ:
- # ゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥ
- user_images = get_user_images（user_id）
- user_images の 莠の合体:
- 瀹？[]
- idx neuranate（user_images） neurano-ahauser img:
- 瀹？ー アーリーイ ティィ。瀹？ー アーイティ。append（f"{idx + 1}: {os。涔 santhbasename（img）}」
+    else:
+        # すべての画像を表示
+        user_images = get_user_images(user_id)
+        if user_images:
+            messages = []
+            for idx, img in enumerate(user_images):
+                messages.append(f"{idx + 1}: {os.path.basename(img)}")
             
- 瀹？ー アーイティ。蛟龍(「\no li la noronerun no dou no dou su kannoinoron no dou no du sukukima su」です)
- イ ミ ヒ ノトラ シ シニ？リー ーニーイーシー。send_message ゥーシー シーシー シノ シー（セチャイス） ミニニ ノイ イ。 ()
- コンテンツ="\n。"join（ 怪っとん？assortーa） 、
- 涔ァハ =[不和。ユーザー_画像] の の ゙ァァイ （）imgfor img 、
- ephemeral=true
+            messages.append("\nこれらの画像のいずれかを選択できます。")
+            await interaction.response.send_message(
+                content="\n".join(messages),
+                files=[discord.File(img) for img in user_images],
+                ephemeral=True
             )
- 瀹ノ ぢ？、まあ:
- イ ミ ヒ ノトラ シ シニ？リィー ーニーイー シィー。莠信_メッ トアルァイ ゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥゥリー ーニーイーシー。send_message ゥーシー シーシー シノ シー（セチャイス） ミニニ ノイ イ。 ()
- content= 「RECOMENT sonssa reataizu MRIVELas a Ribiamoushent」。
+        else:
+            await interaction.response.send_message(
+                content="保存された画像はありません。"
             )
 
 
-@ツ リィー。"description" dificationshitenaloigu ime之 涔之 owosushima su。n owo0ni suurkoto prepression suzu det no's my su。「」
-非同期 デフ delete（interaction: discord。イ ハ ミノトラ シ シニ シ,n: int）:
- user_id =  Ihe MITolaza シ シニ。ゥーーーーー。
+@tree.command(name="delete", description="指定した番号番目の画像を削除します。nを0にすることですべての画像を削除します")
+async def delete(interaction: discord.Interaction, n: int):
+    user_id = interaction.user.id
 
- n == 0 の 勺里 合体:
- #suzu du no 'no' no 'no' no 'o ousonousu suurenu allions
- cretai_ sukuai det_images（user_id）
- イ ミ ノトラ シ シニ？リー ーニーイーシー。send_message ゥーサー ゥーシー シノーシー ミニニ ノイ サ ()
- content=' RECITION sonssa re diteiur suzu do no'su might oushumashiat。、
- ephemeral=true
+    if n == 0:
+        # すべての画像を削除する場合
+        delete_all_images(user_id)
+        await interaction.response.send_message(
+            content="保存されているすべての画像を削除しました。",
+            ephemeral=True
         )
- 瀹ノ ぢ？、まあ:
- # ゥーるーるーリーリーのRECION ゥーウーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンノーンんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこんのこん
- image_path = get_image_by_index（user_id、
+    else:
+        # ユーザーの保存した画像を取得
+        image_path = get_image_by_index(user_id, n)
 
- もし image_path:
- # 莠の瀹 Chur utu urae ゥ ヲ ヲ ヅ シ 出現 んんえい
- = ou obulo DeleteConfirmationView（image_path、 user_id）
- イ ミ ノトラ シ シニ？リー ーニーイーシー。send_message ゥーサー ゥーサー シノ シー ミニニ ノイ イ。 ()
- コンテンツ=f "ju Shriv「"{オス。涔さんbasename（image_path）}」 oushuma su ka？、
- 涔ァハ =discord。file（image_path） 、
- view=view 、
- ephemeral=true
+        if image_path:
+            # 削除確認のビューを作成して送信
+            view = DeleteConfirmationView(image_path, user_id)
+            await interaction.response.send_message(
+                content=f"画像「{os.path.basename(image_path)}」を削除しますか？",
+                file=discord.File(image_path),
+                view=view,
+                ephemeral=True
             )
- 瀹ノ チッ、まあ:
- イ ミ ヒノトラ シ シニ？リー スーニャス。send_message ゥーシー シノシー（she）ハニチ ノイ サ ()
- content=f{n + 1}zu mime no'su might hl sons wens Shimaimownanc.,
- ephemeral=true
+        else:
+            await interaction.response.send_message(
+                content=f"{n + 1}番目の画像は存在しません。",
+                ephemeral=True
             )
 
-キー: 涔_ALAAI-ゾー()
-ラ ミーアアアアー オービーチー ヒトー。嬴 れ(トーーーーー 、 瀹ー)
+keep_alive()
+client.run(TOKEN)
