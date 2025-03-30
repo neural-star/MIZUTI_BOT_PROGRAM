@@ -1,0 +1,2 @@
+# MIZUTI_BOT_PROGRAM
+MIZUTIサーバーのBOTのコードです
