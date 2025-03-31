@@ -8,7 +8,6 @@ import os
 import textwrap
 import glob
 from googleapiclient.discovery import build
-from keep_alive import keep_alive
 
 # Discord Botのセットアップ
 intents = discord.Intents.default()
@@ -344,5 +343,4 @@ async def delete(interaction: discord.Interaction, n: int):
                 ephemeral=True
             )
 
-keep_alive()
 client.run(TOKEN)
