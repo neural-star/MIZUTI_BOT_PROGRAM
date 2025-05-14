@@ -1,4 +1,3 @@
-# MIZUTI_BOT_PROGRAM
 MIZUTIサーバーのBOTのコードです
 
 # MIZUTIサバの招待リンク
