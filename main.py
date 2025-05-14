@@ -7,7 +7,6 @@ import io
 import os
 import textwrap
 import glob
-from googleapiclient.discovery import build
 
 # Discord Botのセットアップ
 intents = discord.Intents.default()
@@ -16,58 +15,16 @@ client = discord.Client(intents=intents, reconnect=True)
 tree = app_commands.CommandTree(client)
 
 TOKEN = os.getenv("TOKEN")
-YOUTUBE_API_KEY = os.getenv("youtube_api_key")
-CHANNEL_ID = os.getenv("chanel_id")
-YOUTUBE_CHANNEL_ID = os.getenv("youtube_id")
 
-MAX_CHARS_PER_LINE = 16  # 16文字ごとに改行
+MAX_CHARS_PER_LINE = 12  # 12文字ごとに改行
 MAX_IMAGES = 10  # 保存する画像の最大数
-
-# YouTube APIの初期化
-youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-# 最新の動画IDを保存して、重複通知を防ぐ
-latest_video_id = None
+cpu_information = {}
 
 @client.event
 async def on_ready():
     await tree.sync()
-    check_new_videos.start()
+    os.makedirs("./files", exist_ok=True)
     print(f"We have logged in as {client.user}")
-
-# 60分ごとにチェック
-@tasks.loop(minutes=60)
-async def check_new_videos():
-    global latest_video_id
-    try:
-        response = youtube.search().list(
-            part="snippet",
-            channelId=YOUTUBE_CHANNEL_ID,
-            order="date",
-            maxResults=1,
-            type="video"
-        ).execute()
-
-        video_id = response['items'][0]['id']['videoId']
-        video_title = response['items'][0]['snippet']['title']
-        video_thumbnail = response['items'][0]['snippet']['thumbnails']['high']['url']
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-
-        if video_id != latest_video_id:
-            channel = client.get_channel(int(CHANNEL_ID))
-
-            embed = discord.Embed(
-                title=video_title,
-                url=video_url,
-                description="新しい動画が公開されました！:tada: ",
-                color=discord.Color.red()
-            )
-            embed.set_thumbnail(url=video_thumbnail)
-
-            await channel.send(embed=embed)
-            latest_video_id = video_id
-
-    except Exception as e:
-        print(f"エラーが発生しました: {e}")
 
 # ユーザーのすべての画像を削除
 def delete_all_images(user_id):
@@ -111,9 +68,9 @@ def get_image_by_index(user_id, index):
     return None
 
 # 画像の保存処理
-async def save_image(user_id, image):
+async def save_image(user_id, image,name):
     folder_path = get_user_folder(user_id)
-    file_path = f"{folder_path}/{discord.utils.utcnow().timestamp()}.png"
+    file_path = f"{folder_path}/{name}.png"
 
     with open(file_path, "wb") as f:
         image.seek(0)
@@ -150,13 +107,14 @@ class MyModal(discord.ui.Modal, title="性能表記"):
         required=True,
     )
 
-    def __init__(self, attachment, font_size, ephemeral, user_id, save):
+    def __init__(self, attachment, font_size, ephemeral, user_id, save,name):
         super().__init__()
         self.attachment = attachment
         self.font_size = font_size
         self.ephemeral = ephemeral
         self.user_id = user_id
         self.save = save
+        self.name = name
 
     async def on_submit(self, interaction: discord.Interaction):
         user_text = self.text_input.value
@@ -216,7 +174,7 @@ class MyModal(discord.ui.Modal, title="性能表記"):
                     ephemeral=True
                 )
             else:
-                await save_image(self.user_id, image_binary)
+                await save_image(self.user_id, image_binary,self.name)
 
         
 
@@ -226,14 +184,16 @@ async def profile(
     attachment: discord.Attachment,
     font_size: int = 20,
     ephemeral: bool = False,
-    save: bool = False
+    save: bool = False,
+    name: str = "CPU",
 ):
     await interaction.response.send_modal(MyModal(
         attachment=attachment,
         font_size=font_size,
         ephemeral=ephemeral,
         user_id=interaction.user.id,
-        save=save
+        save=save,
+        name=name,
     ))
 
 # 削除確認用のビュー
@@ -342,5 +302,85 @@ async def delete(interaction: discord.Interaction, n: int):
                 content=f"{n + 1}番目の画像は存在しません。",
                 ephemeral=True
             )
+
+@tree.command(name="cpuinfo", description="CPUの情報を保存します")
+async def cpuinfo(interaction: discord.Interaction, file: discord.Attachment,instruction: discord.Attachment,name: str = None):
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    if name is None:
+        cpuname = file.filename.split(".")[0]
+    else:
+        cpuname = name
+    
+    cpuname = cpuname.replace(" ", "_")
+    save_path = os.path.join("./files", cpuname + ".mcstructure")
+    await file.save(save_path)
+    save_path = os.path.join("./files", cpuname + ".png")
+    
+    await instruction.save(save_path)
+    cpu_information[cpuname] = interaction.user.id
+    await interaction.followup.send(
+        content="CPUの情報を保存しました！",
+        ephemeral=True
+    )
+
+@tree.command(name="getcpuinfo", description="CPUの情報を取得します")
+async def getcpuinfo(interaction: discord.Interaction, name: str):
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    cpuname = name.replace(" ", "_")
+    save_path = os.path.join("./files", cpuname + ".mcstructure")
+    save_path2 = os.path.join("./files", cpuname + ".png")
+    path = f"./user_images/{cpu_information[cpuname]}/{cpuname}.png"
+    files_to_send = [discord.File(save_path), discord.File(save_path2)]
+    
+    if os.path.exists(path):
+        files_to_send.append(discord.File(path))
+    if os.path.exists(save_path):
+        await interaction.followup.send(
+            content=f"CPUの情報を取得しました！",
+            files=files_to_send,
+            ephemeral=True
+        )
+    else:
+        await interaction.followup.send(
+            content="CPUの情報が見つかりませんでした！",
+            ephemeral=True
+        )
+    
+
+"""
+ここからRPG関連のコード
+"""
+
+RPG_USERS_INFORMATION = {}
+
+@tree.command(name="login", description="ログインします")
+async def login(interaction: discord.Interaction):
+    
+    user_id = interaction.user.id
+    if user_id in RPG_USERS_INFORMATION:
+        await interaction.response.send_message("ログインしました！",ephemeral=True)
+        RPG_USERS_INFORMATION[user_id]["login days"] += 1
+    else:
+        await interaction.response.send_message("まだ登録されていません！/join-rpgを実行して登録してください！",ephemeral=True)
+
+@tree.command(name="information", description="RPGの情報を表示します")
+async def information(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    if user_id in RPG_USERS_INFORMATION:
+        messages = []
+        for key, value in RPG_USERS_INFORMATION[user_id].items():
+            messages.append(f"{key}: {value}\n")
+        await interaction.response.send_message(messages,ephemeral=True)
+    else:
+        await interaction.response.send_message("まだ登録されていません！/join-rpgを実行して登録してください！",ephemeral=True)
+
+@tree.command(name="join-rpg", description="RPGに参加します")
+async def join_rpg(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        content="RPGに参加しました！",
+        ephemeral=True
+    )
+    user_id = interaction.user.id
+    RPG_USERS_INFORMATION[user_id] = {"login days": 0, "level": 0, }
 
 client.run(TOKEN)
