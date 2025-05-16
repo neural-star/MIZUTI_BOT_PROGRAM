@@ -1,113 +1,159 @@
-import discord
-from discord import app_commands
-from discord.ui import View, Button
-from discord.ext import tasks
-from PIL import Image, ImageDraw, ImageFont
-import io
 import os
-import textwrap
+import io
 import glob
+import textwrap
+from datetime import datetime, timezone
 
-# Discord Botのセットアップ
+import discord
+from discord import AuditLogAction, app_commands
+from discord.ui import View, Button
+from PIL import Image, ImageDraw, ImageFont
+
+# ——— 環境変数からトークン取得 ———
+#TOKEN = os.environ["DISCORD_BOT_TOKEN"]
+
+# ——— ログ通知先チャンネル ———
+LOG_CHANNEL_ID = os.environ["LOG_CHANNEL_ID"]
+
+# ——— 画像保存設定 ———
+MAX_CHARS_PER_LINE = 12
+MAX_IMAGES = 10
+
+# ——— Discord Client のセットアップ ———
 intents = discord.Intents.default()
 intents.members = True
 client = discord.Client(intents=intents, reconnect=True)
 tree = app_commands.CommandTree(client)
 
-TOKEN = os.getenv("TOKEN")
+# ——— AuditLog 検索ヘルパー ———
+async def fetch_audit_entry(
+    guild: discord.Guild,
+    action: AuditLogAction,
+    target_id: int,
+    *,
+    lookback: float = 15.0
+) -> discord.AuditLogEntry | None:
+    now = datetime.now(timezone.utc)
+    async for entry in guild.audit_logs(limit=10, action=action):
+        if entry.target.id == target_id:
+            if (now - entry.created_at).total_seconds() <= lookback:
+                return entry
+    return None
 
-MAX_CHARS_PER_LINE = 12  # 12文字ごとに改行
-MAX_IMAGES = 10  # 保存する画像の最大数
-cpu_information = {}
+# ——— 画像保存／管理ユーティリティ ———
+def get_user_folder(user_id: int) -> str:
+    path = f"./user_images/{user_id}/"
+    os.makedirs(path, exist_ok=True)
+    return path
 
-@client.event
-async def on_ready():
-    await tree.sync()
-    os.makedirs("./files", exist_ok=True)
-    print(f"We have logged in as {client.user}")
+def get_user_images(user_id: int) -> list[str]:
+    folder = get_user_folder(user_id)
+    return sorted(glob.glob(f"{folder}/*.png"))
 
-# ユーザーのすべての画像を削除
-def delete_all_images(user_id):
-    user_images = get_user_images(user_id)
-    for img in user_images:
-        delete_image(img)
+def delete_all_images(user_id: int) -> None:
+    for p in get_user_images(user_id):
+        try: os.remove(p)
+        except: pass
 
-# 画像を削除
-def delete_image(image_path):
+def delete_image(path: str) -> bool:
     try:
-        os.remove(image_path)
+        os.remove(path)
         return True
-    except Exception as e:
-        print(f"Error deleting image: {e}")
+    except:
         return False
 
-# ユーザーのフォルダを取得 or 作成
-def get_user_folder(user_id):
-    folder_path = f"./user_images/{user_id}/"
-    os.makedirs(folder_path, exist_ok=True)
-    return folder_path
-
-# ユーザーの画像一覧を取得
-def get_user_images(user_id):
-    folder_path = get_user_folder(user_id)
-    return sorted(glob.glob(f"{folder_path}/*.png"))  # 古い順にソート
-
-# ユーザーの画像をファイル名で検索
-def get_image_by_name(user_id, name):
-    user_images = get_user_images(user_id)
-    for img in user_images:
-        if name in img:  # ファイル名に名前が含まれているかチェック
-            return img
-    return None
-
-# ユーザーの画像をn番目の画像で取得
-def get_image_by_index(user_id, index):
-    user_images = get_user_images(user_id)
-    if 0 <= index < len(user_images):
-        return user_images[index]
-    return None
-
-# 画像の保存処理
-async def save_image(user_id, image,name):
-    folder_path = get_user_folder(user_id)
-    file_path = f"{folder_path}/{name}.png"
-
+async def save_image(user_id: int, image_binary: io.BytesIO, name: str) -> str:
+    folder = get_user_folder(user_id)
+    file_path = os.path.join(folder, f"{name}.png")
     with open(file_path, "wb") as f:
-        image.seek(0)
-        f.write(image.read())
-
+        f.write(image_binary.read())
     return file_path
 
-# 画像削除確認ボタンのView
-class DeleteConfirmationView(View):
-    def __init__(self, oldest_image, user_id,image_binary):
+# ——— キック／退出監視 ———
+@client.event
+async def on_member_remove(member: discord.Member):
+    guild = member.guild
+    log_ch = guild.get_channel(LOG_CHANNEL_ID)
+    if not log_ch:
+        return
+
+    # キック判定
+    kick_entry = await fetch_audit_entry(guild, AuditLogAction.kick, member.id)
+    if kick_entry:
+        reason = kick_entry.reason or "なし"
+        ts = kick_entry.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        await log_ch.send(
+            f"🚪 **{member}** がキックされました\n"
+            f"→ 実行者: **{kick_entry.user}**\n"
+            f"→ 時間: `{ts}`\n"
+            f"→ 理由: {reason}"
+        )
+        return
+
+    # 自発退出
+    await log_ch.send(f"👋 **{member}** が退出しました")
+
+@client.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    log_ch = guild.get_channel(LOG_CHANNEL_ID)
+    if not log_ch:
+        return
+
+    ban_entry = await fetch_audit_entry(guild, AuditLogAction.ban, user.id)
+    if ban_entry:
+        reason = ban_entry.reason or "なし"
+        ts = ban_entry.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        await log_ch.send(
+            f"🔨 **{user}** が BAN されました\n"
+            f"→ 実行者: **{ban_entry.user}**\n"
+            f"→ 時間: `{ts}`\n"
+            f"→ 理由: {reason}"
+        )
+    else:
+        now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        await log_ch.send(f"🔨 **{user}** が BAN されました\n→ 時間: `{now}`")
+
+# ——— 画像生成モーダル／ビュー ———
+class ImageSaveConfirmation(View):
+    def __init__(self, oldest_path: str, user_id: int, image_binary: io.BytesIO, name: str):
         super().__init__()
-        self.oldest_image = oldest_image
+        self.target = oldest_path
         self.user_id = user_id
-        self.image_binary = image_binary
+        self.binary = image_binary
+        self.name = name
 
-    @discord.ui.button(label="YES (削除)", style=discord.ButtonStyle.danger)
-    async def confirm_delete(self, interaction: discord.Interaction, button: Button):
-        try:
-            os.remove(self.oldest_image)
-            await interaction.response.send_message("古い画像を削除しました。", ephemeral=True)
-            await save_image(self.user_id, self.image_binary)
-        except Exception as e:
-            await interaction.response.send_message(f"削除に失敗しました: {e}", ephemeral=True)
+    @discord.ui.button(label="削除して保存", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: Button):
+        os.remove(self.target)
+        await save_image(self.user_id, self.binary, self.name)
+        await interaction.response.send_message("古い画像を削除して保存しました。", ephemeral=True)
 
-    @discord.ui.button(label="NO (保存しない)", style=discord.ButtonStyle.secondary)
-    async def cancel_delete(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("画像の保存を取り消しました", ephemeral=True)
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message("保存をキャンセルしました。", ephemeral=True)
 
-class MyModal(discord.ui.Modal, title="性能表記"):
+class ImageDeleteConfirmation(View):
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = path
+
+    @discord.ui.button(label="削除", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction: discord.Interaction, button: Button):
+        delete_image(self.path)
+        await interaction.response.send_message("画像を削除しました。", ephemeral=True)
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message("削除をキャンセルしました。", ephemeral=True)
+
+class ProfileModal(discord.ui.Modal, title="性能表記"):
     text_input = discord.ui.TextInput(
-        label="性能などの情報を記入してください",
-        placeholder="例:周波数,ビット数など...",
+        label="性能情報 (例: 周波数, ビット数など)",
         style=discord.TextStyle.paragraph,
         required=True,
     )
 
-    def __init__(self, attachment, font_size, ephemeral, user_id, save,name):
+    def __init__(self, attachment, font_size, ephemeral, user_id, save, name):
         super().__init__()
         self.attachment = attachment
         self.font_size = font_size
@@ -117,270 +163,147 @@ class MyModal(discord.ui.Modal, title="性能表記"):
         self.name = name
 
     async def on_submit(self, interaction: discord.Interaction):
-        user_text = self.text_input.value
-
-        # 画像を取得
-        image_bytes = await self.attachment.read()
-        original_image = Image.open(io.BytesIO(image_bytes))
-
-        # 画像を一旦300x300にリサイズ
-        original_image = original_image.resize((300, 300), Image.LANCZOS)
-
-        # フォント設定
+        # 画像処理
+        data = await self.attachment.read()
+        img = Image.open(io.BytesIO(data)).resize((300,300), Image.LANCZOS)
         font = ImageFont.truetype("./msgothic.ttc", self.font_size)
+        lines = textwrap.wrap(self.text_input.value, MAX_CHARS_PER_LINE)
+        extra = len(lines) * (self.font_size + 5)
+        canvas = Image.new("RGB", (300, 300 + extra), "white")
+        canvas.paste(img, (0,0))
+        draw = ImageDraw.Draw(canvas)
+        y = 300
+        for line in lines:
+            draw.text((10, y), line, fill="black", font=font)
+            y += self.font_size + 5
 
-        # 改行処理（MAX_CHARS_PER_LINE 文字ごと）
-        wrapped_text = textwrap.wrap(user_text, MAX_CHARS_PER_LINE)
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG")
+        buf.seek(0)
 
-        # 必要な余白を計算（行数 * フォントサイズ + 行間調整）
-        num_lines = len(wrapped_text)
-        extra_space = num_lines * (self.font_size + 5)  # 行ごとに余白を追加
-
-        # 新しいキャンバス作成（元画像 + 余白）
-        new_height = 300 + extra_space
-        new_image = Image.new("RGB", (300, new_height), "white")
-        new_image.paste(original_image, (0, 0))
-
-        # テキスト描画
-        draw = ImageDraw.Draw(new_image)
-        y_position = 300  # 画像の下部から少し余白を空ける
-        for line in wrapped_text:
-            draw.text((10, y_position), line, fill="black", font=font)
-            y_position += self.font_size + 5  # 行間を調整
-
-        # 画像をバイトデータに変換
-        image_binary = io.BytesIO()
-        new_image.save(image_binary, format="PNG")
-        image_binary.seek(0)
-
-        # 画像を送信
         await interaction.response.send_message(
-            content="画像を生成しました！",
-            file=discord.File(fp=image_binary, filename="modified_image.png"),
+            "画像を生成しました！",
+            file=discord.File(buf, "modified.png"),
             ephemeral=self.ephemeral
         )
 
-        # ユーザーごとのフォルダに保存（オプション）
         if self.save:
-            user_images = get_user_images(self.user_id)
-            if len(user_images) >= MAX_IMAGES:
-                # 画像が10枚を超えたら、一番古い画像を削除するか確認
-                oldest_image = user_images[0]
-                view = DeleteConfirmationView(oldest_image, self.user_id,image_binary)
+            imgs = get_user_images(self.user_id)
+            if len(imgs) >= MAX_IMAGES:
+                view = ImageSaveConfirmation(imgs[0], self.user_id, buf, self.name)
                 await interaction.followup.send(
-                    f"保存上限を超えました。最も古い画像を削除しますか？一番古い画像:",
-                    file=discord.File(user_images[0]),
+                    "上限を超えました。古い画像を削除してもよいですか？",
+                    file=discord.File(imgs[0]),
                     view=view,
                     ephemeral=True
                 )
             else:
-                await save_image(self.user_id, image_binary,self.name)
+                await save_image(self.user_id, buf, self.name)
 
-        
-
-@tree.command(name="profile", description="画像に、CPUなどの情報を追加します")
+# ——— スラッシュコマンド定義 ———
+@tree.command(name="profile", description="画像に情報を追加します")
 async def profile(
     interaction: discord.Interaction,
     attachment: discord.Attachment,
     font_size: int = 20,
     ephemeral: bool = False,
     save: bool = False,
-    name: str = "CPU",
+    name: str = "CPU"
 ):
-    await interaction.response.send_modal(MyModal(
+    await interaction.response.send_modal(ProfileModal(
         attachment=attachment,
         font_size=font_size,
         ephemeral=ephemeral,
         user_id=interaction.user.id,
         save=save,
-        name=name,
+        name=name
     ))
 
-# 削除確認用のビュー
-class DeleteConfirmationView(discord.ui.View):
-    def __init__(self, image_path, user_id):
-        super().__init__()
-        self.image_path = image_path
-        self.user_id = user_id
-
-    @discord.ui.button(label="削除", style=discord.ButtonStyle.danger)
-    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if delete_image(self.image_path):
-            await interaction.response.send_message(
-                content=f"画像「{os.path.basename(self.image_path)}」を削除しました。",
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                content="画像の削除に失敗しました。",
-                ephemeral=True
-            )
-        self.stop()
-
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
-    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            content="削除がキャンセルされました。",
-            ephemeral=True
-        )
-        self.stop()
-
-@tree.command(name="library", description="ユーザーの保存した画像を表示します")
-async def library(interaction: discord.Interaction, name: str = None, n: int = None):
+@tree.command(name="library", description="保存画像を一覧表示します")
+async def library(
+    interaction: discord.Interaction,
+    name: str | None = None,
+    n: int | None = None
+):
     user_id = interaction.user.id
+    imgs = get_user_images(user_id)
 
     if name:
-        # 指定した名前の画像を検索
-        image_path = get_image_by_name(user_id, name)
-        if image_path:
-            await interaction.response.send_message(
-                content=f"指定された名前の画像: {name}",
-                file=discord.File(image_path)
-            )
+        path = next((p for p in imgs if name in os.path.basename(p)), None)
+        if path:
+            await interaction.response.send_message(file=discord.File(path))
         else:
-            await interaction.response.send_message(
-                content=f"指定された名前の画像「{name}」は見つかりませんでした。"
-            )
+            await interaction.response.send_message("該当画像が見つかりません。")
     elif n is not None:
-        # 指定された番号の画像を表示
-        image_path = get_image_by_index(user_id, n)
-        if image_path:
-            await interaction.response.send_message(
-                content=f"{n + 1}番目の画像を表示します。",
-                file=discord.File(image_path)
-            )
+        if 0 <= n-1 < len(imgs):
+            await interaction.response.send_message(file=discord.File(imgs[n-1]))
         else:
-            await interaction.response.send_message(
-                content=f"{n + 1}番目の画像は存在しません。"
-            )
+            await interaction.response.send_message("その番号の画像は存在しません。")
     else:
-        # すべての画像を表示
-        user_images = get_user_images(user_id)
-        if user_images:
-            messages = []
-            for idx, img in enumerate(user_images):
-                messages.append(f"{idx + 1}: {os.path.basename(img)}")
-            
-            messages.append("\nこれらの画像のいずれかを選択できます。")
+        if imgs:
+            msg = "\n".join(f"{i+1}: {os.path.basename(p)}" for i,p in enumerate(imgs))
             await interaction.response.send_message(
-                content="\n".join(messages),
-                files=[discord.File(img) for img in user_images],
-                ephemeral=True
+                msg, files=[discord.File(p) for p in imgs], ephemeral=True
             )
         else:
-            await interaction.response.send_message(
-                content="保存された画像はありません。"
-            )
+            await interaction.response.send_message("保存画像はありません。")
 
-
-@tree.command(name="delete", description="指定した番号番目の画像を削除します。nを0にすることですべての画像を削除します")
-async def delete(interaction: discord.Interaction, n: int):
+@tree.command(name="delete", description="画像を削除します (0 で全削除)")
+async def delete(
+    interaction: discord.Interaction,
+    n: int
+):
     user_id = interaction.user.id
+    imgs = get_user_images(user_id)
 
     if n == 0:
-        # すべての画像を削除する場合
         delete_all_images(user_id)
-        await interaction.response.send_message(
-            content="保存されているすべての画像を削除しました。",
-            ephemeral=True
-        )
+        await interaction.response.send_message("すべての画像を削除しました。", ephemeral=True)
     else:
-        # ユーザーの保存した画像を取得
-        image_path = get_image_by_index(user_id, n)
-
-        if image_path:
-            # 削除確認のビューを作成して送信
-            view = DeleteConfirmationView(image_path, user_id)
+        idx = n - 1
+        if 0 <= idx < len(imgs):
+            view = ImageDeleteConfirmation(imgs[idx])
             await interaction.response.send_message(
-                content=f"画像「{os.path.basename(image_path)}」を削除しますか？",
-                file=discord.File(image_path),
+                f"「{os.path.basename(imgs[idx])}」を削除しますか？",
+                file=discord.File(imgs[idx]),
                 view=view,
                 ephemeral=True
             )
         else:
-            await interaction.response.send_message(
-                content=f"{n + 1}番目の画像は存在しません。",
-                ephemeral=True
-            )
+            await interaction.response.send_message("その番号の画像は存在しません。", ephemeral=True)
 
-@tree.command(name="cpuinfo", description="CPUの情報を保存します")
-async def cpuinfo(interaction: discord.Interaction, file: discord.Attachment,instruction: discord.Attachment,name: str = None):
-    await interaction.response.defer(thinking=True, ephemeral=True)
-    if name is None:
-        cpuname = file.filename.split(".")[0]
-    else:
-        cpuname = name
-    
-    cpuname = cpuname.replace(" ", "_")
-    save_path = os.path.join("./files", cpuname + ".mcstructure")
-    await file.save(save_path)
-    save_path = os.path.join("./files", cpuname + ".png")
-    
-    await instruction.save(save_path)
-    cpu_information[cpuname] = interaction.user.id
-    await interaction.followup.send(
-        content="CPUの情報を保存しました！",
-        ephemeral=True
-    )
-
-@tree.command(name="getcpuinfo", description="CPUの情報を取得します")
-async def getcpuinfo(interaction: discord.Interaction, name: str):
-    await interaction.response.defer(thinking=True, ephemeral=True)
-    cpuname = name.replace(" ", "_")
-    save_path = os.path.join("./files", cpuname + ".mcstructure")
-    save_path2 = os.path.join("./files", cpuname + ".png")
-    path = f"./user_images/{cpu_information[cpuname]}/{cpuname}.png"
-    files_to_send = [discord.File(save_path), discord.File(save_path2)]
-    
-    if os.path.exists(path):
-        files_to_send.append(discord.File(path))
-    if os.path.exists(save_path):
-        await interaction.followup.send(
-            content=f"CPUの情報を取得しました！",
-            files=files_to_send,
-            ephemeral=True
-        )
-    else:
-        await interaction.followup.send(
-            content="CPUの情報が見つかりませんでした！",
-            ephemeral=True
-        )
-    
-
-"""
-ここからRPG関連のコード
-"""
-
-RPG_USERS_INFORMATION = {}
-
-@tree.command(name="login", description="ログインします")
-async def login(interaction: discord.Interaction):
-    
-    user_id = interaction.user.id
-    if user_id in RPG_USERS_INFORMATION:
-        await interaction.response.send_message("ログインしました！",ephemeral=True)
-        RPG_USERS_INFORMATION[user_id]["login days"] += 1
-    else:
-        await interaction.response.send_message("まだ登録されていません！/join-rpgを実行して登録してください！",ephemeral=True)
-
-@tree.command(name="information", description="RPGの情報を表示します")
-async def information(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    if user_id in RPG_USERS_INFORMATION:
-        messages = []
-        for key, value in RPG_USERS_INFORMATION[user_id].items():
-            messages.append(f"{key}: {value}\n")
-        await interaction.response.send_message(messages,ephemeral=True)
-    else:
-        await interaction.response.send_message("まだ登録されていません！/join-rpgを実行して登録してください！",ephemeral=True)
+# ——— RPG コマンド群 ———
+RPG_USERS = {}
 
 @tree.command(name="join-rpg", description="RPGに参加します")
 async def join_rpg(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        content="RPGに参加しました！",
-        ephemeral=True
-    )
-    user_id = interaction.user.id
-    RPG_USERS_INFORMATION[user_id] = {"login days": 0, "level": 0, }
+    uid = interaction.user.id
+    if uid not in RPG_USERS:
+        RPG_USERS[uid] = {"login_days": 0, "level": 1}
+    await interaction.response.send_message("RPGに参加しました！", ephemeral=True)
+
+@tree.command(name="login", description="RPGにログインします")
+async def login(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid in RPG_USERS:
+        RPG_USERS[uid]["login_days"] += 1
+        await interaction.response.send_message("ログインしました！", ephemeral=True)
+    else:
+        await interaction.response.send_message("未登録です。/join-rpg で登録してください。", ephemeral=True)
+
+@tree.command(name="rpg_information", description="RPGステータスを表示します")
+async def rpg_information(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid in RPG_USERS:
+        info = "\n".join(f"{k}: {v}" for k,v in RPG_USERS[uid].items())
+        await interaction.response.send_message(info, ephemeral=True)
+    else:
+        await interaction.response.send_message("未登録です。/join-rpg で登録してください。", ephemeral=True)
+
+# ——— 起動処理 ———
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"Logged in as {client.user} (ID: {client.user.id})")
 
 client.run(TOKEN)
