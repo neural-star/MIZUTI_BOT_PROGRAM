@@ -8,12 +8,15 @@ import discord
 from discord import AuditLogAction, app_commands
 from discord.ui import View, Button
 from PIL import Image, ImageDraw, ImageFont
+from flask import Flask, send_from_directory, render_template, jsonify, url_for
+from flask_cors import CORS
+from threading import Thread
 
 # ——— 環境変数からトークン取得 ———
-#TOKEN = os.environ["DISCORD_BOT_TOKEN"]
+TOKEN = ps.getenv("TOKEN")
 
 # ——— ログ通知先チャンネル ———
-LOG_CHANNEL_ID = os.environ["LOG_CHANNEL_ID"]
+LOG_CHANNEL_ID = os.get("CHANNEL_ID")
 
 # ——— 画像保存設定 ———
 MAX_CHARS_PER_LINE = 12
@@ -24,6 +27,8 @@ intents = discord.Intents.default()
 intents.members = True
 client = discord.Client(intents=intents, reconnect=True)
 tree = app_commands.CommandTree(client)
+
+user_cache = {}  # ユーザーID -> ユーザー名のキャッシュ
 
 # ——— AuditLog 検索ヘルパー ———
 async def fetch_audit_entry(
@@ -65,6 +70,8 @@ def delete_image(path: str) -> bool:
 async def save_image(user_id: int, image_binary: io.BytesIO, name: str) -> str:
     folder = get_user_folder(user_id)
     file_path = os.path.join(folder, f"{name}.png")
+    
+    image_binary.seek(0)
     with open(file_path, "wb") as f:
         f.write(image_binary.read())
     return file_path
@@ -305,5 +312,75 @@ async def rpg_information(interaction: discord.Interaction):
 async def on_ready():
     await tree.sync()
     print(f"Logged in as {client.user} (ID: {client.user.id})")
+    for guild in client.guilds:
+        async for member in guild.fetch_members(limit=None):
+            user_cache[str(member.id)] = f'{member.name}#{member.discriminator}'
 
-client.run(TOKEN)
+# ——— Flask処理 ———
+app = Flask(__name__)
+CORS(app)
+USER_IMAGE_DIR = "user_images"
+
+# ─── 静的ファイル配信用エンドポイント ───
+@app.route('/user_images/<path:filename>')
+def user_image(filename):
+    return send_from_directory(USER_IMAGE_DIR, filename)
+
+# ─── HTMLギャラリー ───
+@app.route('/')
+def index():
+
+    folders = []
+    for user_id in sorted(os.listdir(USER_IMAGE_DIR)):
+        user_path = os.path.join(USER_IMAGE_DIR, user_id)
+        if not os.path.isdir(user_path):
+            continue
+
+        pngs = [
+            f"{user_id}/{f}"
+            for f in os.listdir(user_path)
+            if f.lower().endswith('.png')
+        ]
+        username = user_cache.get(user_id, f"Unknown ({user_id})")
+        folders.append({"user": username, "images": pngs})
+
+    return render_template('index.html', folders=folders)
+
+# ─── JSON API ───
+@app.route('/api/users')
+def api_users():
+    # 同じくここでだけインポート
+    from main import user_cache
+
+    folders = []
+    for user_id in sorted(os.listdir(USER_IMAGE_DIR)):
+        user_path = os.path.join(USER_IMAGE_DIR, user_id)
+        if not os.path.isdir(user_path):
+            continue
+
+        pngs = [
+            f"{user_id}/{fname}"
+            for fname in os.listdir(user_path)
+            if fname.lower().endswith('.png')
+        ]
+        username = user_cache.get(user_id, f"Unknown ({user_id})")
+        image_urls = [
+            url_for('user_image', filename=path, _external=True)
+            for path in pngs
+        ]
+        folders.append({"user": username, "images": image_urls})
+
+    return jsonify(folders)
+
+def run():
+    app.run(debug=False, host="0.0.0.0", port=8080)
+
+def keep_alive():
+    server = Thread(target=run)
+    server.daemon = True
+    server.start()
+
+if __name__ == "__main__":
+    os.makedirs(USER_IMAGE_DIR, exist_ok=True)
+    keep_alive()
+    client.run(TOKEN)
