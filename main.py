@@ -8,8 +8,8 @@ import discord
 from discord import AuditLogAction, app_commands
 from discord.ui import View, Button
 from PIL import Image, ImageDraw, ImageFont
-from .shared import user_cache
-from.keep_alive import keep_alive
+from shared import user_cache, USER_IMAGE_DIR
+from keep_alive import keep_alive
 
 # ——— 環境変数からトークン取得 ———
 TOKEN = os.getenv("TOKEN")
@@ -326,6 +326,6 @@ async def on_ready():
     await cache_user_name()
 
 if __name__ == "__main__":
-    os.makedirs(keep_alive.USER_IMAGE_DIR, exist_ok=True)
+    os.makedirs(USER_IMAGE_DIR, exist_ok=True)
     keep_alive()
     client.run(TOKEN)
