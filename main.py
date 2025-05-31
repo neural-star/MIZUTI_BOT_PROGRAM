@@ -8,15 +8,14 @@ import discord
 from discord import AuditLogAction, app_commands
 from discord.ui import View, Button
 from PIL import Image, ImageDraw, ImageFont
-from flask import Flask, send_from_directory, render_template, jsonify, url_for
-from flask_cors import CORS
-from threading import Thread
+from .shared import user_cache
+from.keep_alive import keep_alive
 
 # ——— 環境変数からトークン取得 ———
-TOKEN = ps.getenv("TOKEN")
+TOKEN = os.getenv("TOKEN")
 
 # ——— ログ通知先チャンネル ———
-LOG_CHANNEL_ID = os.get("CHANNEL_ID")
+LOG_CHANNEL_ID = 1372856531229610104
 
 # ——— 画像保存設定 ———
 MAX_CHARS_PER_LINE = 12
@@ -279,6 +278,12 @@ async def delete(
         else:
             await interaction.response.send_message("その番号の画像は存在しません。", ephemeral=True)
 
+@tree.command(name="reset_user_cache")
+async def reset_user_cache(interaction: discord.Interaction):
+    """ユーザーキャッシュをリセットします。"""
+    await cache_user_name()
+    await interaction.response.send_message(f"ユーザーキャッシュをリセットしました\n{user_cache}", ephemeral=True)
+
 # ——— RPG コマンド群 ———
 RPG_USERS = {}
 
@@ -308,79 +313,19 @@ async def rpg_information(interaction: discord.Interaction):
         await interaction.response.send_message("未登録です。/join-rpg で登録してください。", ephemeral=True)
 
 # ——— 起動処理 ———
-@client.event
-async def on_ready():
-    await tree.sync()
-    print(f"Logged in as {client.user} (ID: {client.user.id})")
+
+async def cache_user_name():
     for guild in client.guilds:
         async for member in guild.fetch_members(limit=None):
             user_cache[str(member.id)] = f'{member.name}#{member.discriminator}'
 
-# ——— Flask処理 ———
-app = Flask(__name__)
-CORS(app)
-USER_IMAGE_DIR = "user_images"
-
-# ─── 静的ファイル配信用エンドポイント ───
-@app.route('/user_images/<path:filename>')
-def user_image(filename):
-    return send_from_directory(USER_IMAGE_DIR, filename)
-
-# ─── HTMLギャラリー ───
-@app.route('/')
-def index():
-
-    folders = []
-    for user_id in sorted(os.listdir(USER_IMAGE_DIR)):
-        user_path = os.path.join(USER_IMAGE_DIR, user_id)
-        if not os.path.isdir(user_path):
-            continue
-
-        pngs = [
-            f"{user_id}/{f}"
-            for f in os.listdir(user_path)
-            if f.lower().endswith('.png')
-        ]
-        username = user_cache.get(user_id, f"Unknown ({user_id})")
-        folders.append({"user": username, "images": pngs})
-
-    return render_template('index.html', folders=folders)
-
-# ─── JSON API ───
-@app.route('/api/users')
-def api_users():
-    # 同じくここでだけインポート
-    from main import user_cache
-
-    folders = []
-    for user_id in sorted(os.listdir(USER_IMAGE_DIR)):
-        user_path = os.path.join(USER_IMAGE_DIR, user_id)
-        if not os.path.isdir(user_path):
-            continue
-
-        pngs = [
-            f"{user_id}/{fname}"
-            for fname in os.listdir(user_path)
-            if fname.lower().endswith('.png')
-        ]
-        username = user_cache.get(user_id, f"Unknown ({user_id})")
-        image_urls = [
-            url_for('user_image', filename=path, _external=True)
-            for path in pngs
-        ]
-        folders.append({"user": username, "images": image_urls})
-
-    return jsonify(folders)
-
-def run():
-    app.run(debug=False, host="0.0.0.0", port=8080)
-
-def keep_alive():
-    server = Thread(target=run)
-    server.daemon = True
-    server.start()
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"Logged in as {client.user} (ID: {client.user.id})")
+    await cache_user_name()
 
 if __name__ == "__main__":
-    os.makedirs(USER_IMAGE_DIR, exist_ok=True)
+    os.makedirs(keep_alive.USER_IMAGE_DIR, exist_ok=True)
     keep_alive()
     client.run(TOKEN)
