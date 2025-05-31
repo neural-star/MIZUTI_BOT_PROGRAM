@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ユーザー画像一覧</title>
+  <style>
+    .folder-section {
+      margin-bottom: 40px;
+    }
+
+    .folder-title {
+      font-size: 22px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .image-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .image-grid img {
+      max-width: 200px;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+
+  {% for folder in folders %}
+  <div class="folder-section">
+    <div class="folder-title">{{ folder.user }}</div>
+    <div class="image-grid">
+      {% for img in folder.images %}
+        <img src="{{ url_for('user_image', filename=img) }}" alt="{{ img }}">
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+</body>
+</html>
