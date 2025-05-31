@@ -2,11 +2,10 @@ from flask import Flask, send_from_directory, render_template, jsonify, url_for
 from flask_cors import CORS
 import os
 from threading import Thread
-from .shared import user_cache
+from shared import user_cache, USER_IMAGE_DIR
 
 app = Flask(__name__)
 CORS(app)
-USER_IMAGE_DIR = "user_images"
 
 # ─── 静的ファイル配信用エンドポイント ───
 @app.route('/user_images/<path:filename>')
